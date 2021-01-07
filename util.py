@@ -1,11 +1,21 @@
 import os
+import sys
 import numpy as np
 import pandas as pd
 import shutil
 
 import torch
+from torchvision import transforms
+import cv2
+
+import albumentations as A
 
 from datetime import datetime
+
+# Fmix-master folder rigit click -> mark directory as -> resources
+sys.path.append('/home/kerrykim/jupyter_notebook/010.cldc/FMix-master')
+from fmix import *
+from train import *
 
 ## from tensor to numpy function
 fn_tonumpy = lambda x: x.to('cpu').detach().numpy()
@@ -68,3 +78,4 @@ def load(ckpt_dir, net, optim):
     epoch = int(ckpt_lst[-1].split('epoch')[1].split('_batch')[0])
 
     return net, optim, epoch
+

@@ -1,9 +1,10 @@
 '''
 !python3 './main.py' \
 --mode "train" --train_continue "off" \
---seed 719 --img_x 224 --img_y 224 \
+--seed 719 --img_x 512 --img_y 512 \
 --lr 1e-4 --num_fold 10 --num_epoch 10 --batch_size 8 \
--- label_smooth False --swa False\
+--cutmix False --fmix False \
+--label_smooth False --swa False \
 --data_dir "./data/train_images" \
 --ckpt_dir "./checkpoint" \
 --result_dir "./result" \
@@ -51,6 +52,9 @@ parser.add_argument("--lr", default=1e-4, type=float, dest="lr")
 parser.add_argument("--num_fold", default=10, type=int, dest="num_fold")
 parser.add_argument("--num_epoch", default=10, type=int, dest="num_epoch")
 parser.add_argument("--batch_size", default=4, type=int, dest="batch_size")
+
+parser.add_argument("--cutmix", default=False, choices=[True, False], type=bool, dest="cutmix")
+parser.add_argument("--fmix", default=False, choices=[True, False], type=bool, dest="fmix")
 
 parser.add_argument("--label_smooth", default=False, choices=[True, False], type=bool, dest="label_smooth")
 parser.add_argument("--swa", default=False, choices=[True, False], type=bool, dest="swa")

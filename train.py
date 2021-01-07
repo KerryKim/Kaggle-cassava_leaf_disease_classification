@@ -17,11 +17,9 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import accuracy_score
 
 import albumentations as A
+from albumentations.pytorch import ToTensorV2
 
-# Fmix-master folder rigit click -> mark directory as -> resources
-sys.path.append('/home/kerrykim/jupyter_notebook/010.cldc/FMix-master')
-from fmix import *
-    
+
 from model import *
 from loss import *
 from dataset import *
@@ -37,23 +35,23 @@ def transform_train(img_x, img_y):
                       A.HueSaturationValue(hue_shift_limit=0.2, sat_shift_limit=0.2, val_shift_limit=0.2, p=0.5),
                       A.RandomBrightnessContrast(brightness_limit=(-0.1, 0.1), contrast_limit=(-0.1, 0.1), p=0.5),
                       A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225], max_pixel_value=255.0, p=1.0),
-                      A.CoarseDropout(p=0.5), A.Cutout(p=0.5)], p=1.)
+                      A.CoarseDropout(p=0.5), A.Cutout(p=0.5),ToTensorV2(p=1.0)], p=1.)
 
 
 def transform_val(img_x, img_y):
     return A.Compose([A.CenterCrop(img_x, img_y, p=1.),
                       A.Resize(img_x, img_y),
-                      A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225], max_pixel_value=255.0, p=1.0)], p=1.)
+                      A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225], max_pixel_value=255.0, p=1.0),ToTensorV2(p=1.0)], p=1.)
 
 ##
-def prepare_dataloader(df, data_dir, trn_idx, val_idx, img_x, img_y, batch_size):
+def prepare_dataloader(df, data_dir, trn_idx, val_idx, img_x, img_y, batch_size, cutmix, fmix):
     train = df.loc[trn_idx, :].reset_index(drop=True)
     val = df.loc[val_idx, :].reset_index(drop=True)
 
-    dataset_train = Dataset(df=train, data_dir=data_dir, transform=transform_train(img_x, img_y))
+    dataset_train = Dataset(df=train, data_dir=data_dir, img_x=img_x, img_y=img_y, transform=transform_train(img_x, img_y), cutmix=cutmix, fmix=fmix)
     loader_train = DataLoader(dataset_train, batch_size=batch_size, shuffle=True, num_workers=8)
 
-    dataset_val = Dataset(df=val, data_dir=data_dir, transform=transform_val(img_x, img_y))
+    dataset_val = Dataset(df=val, data_dir=data_dir, img_x=img_x, img_y=img_y, transform=transform_val(img_x, img_y), cutmix=False, fmix=False)
     loader_val = DataLoader(dataset_val, batch_size=batch_size, shuffle=True, num_workers=8)
 
     num_data_train = len(dataset_train)
@@ -78,6 +76,9 @@ def train(args):
     num_epoch = args.num_epoch
     batch_size = args.batch_size
 
+    cutmix = args.cutmix
+    fmix = args.fmix
+
     label_smooth = args.label_smooth
     swa = args.swa
 
@@ -97,14 +98,14 @@ def train(args):
             break
 
         print("Training start ... ")
-        print("ST_DATE: {} | ".format(datetime.now().strftime("%m.%d-%H:%M")), "KFOLD: {}/{}".format(fold, num_fold))
+        print("DATE: {} | ".format(datetime.now().strftime("%m.%d-%H:%M")), "KFOLD: {}/{}".format(fold, num_fold))
 
         loader_train, loader_val, num_batch_train, num_batch_val = \
-            prepare_dataloader(df, data_dir, trn_idx, val_idx, img_x, img_y, batch_size)
+            prepare_dataloader(df, data_dir, trn_idx, val_idx, img_x, img_y, batch_size, cutmix, fmix)
 
         net = CassvaImgClassifier(network, df.label.nunique(), pretrained=True).to(device)
-        fn_loss = CrossEntropyLoss if not label_smooth else Label_Smooth_CrossEntropyLoss
-        optim = torch.optim.Adam(net.parameters(), lr=lr)
+        fn_loss = nn.CrossEntropyLoss().to(device) if not label_smooth else Label_Smooth_CrossEntropyLoss
+        optim = torch.optim.Adam(net.parameters(), lr=lr, weight_decay=1e-6)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optim, T_0=10, T_mult=1, eta_min=1e-6, last_epoch=-1)
         scaler = GradScaler()
 
@@ -189,7 +190,7 @@ def train(args):
                 val_loss.append(loss_epoch_val / num_batch_val)
                 val_acc.append(acc_epoch_val / num_batch_val)
 
-            print("TR_DATE: {} | ".format(datetime.now().strftime("%m.%d-%H:%M")), "EPOCH: {}/{} | ".format(epoch, num_epoch),
+            print("DATE: {} | ".format(datetime.now().strftime("%m.%d-%H:%M")), "EPOCH: {}/{} | ".format(epoch, num_epoch),
                   "TRAIN_LOSS: {:4f} | ".format(train_loss[-1]),  "TRAIN_ACC: {:4f} | ".format(train_acc[-1]),
                   "VAL_LOSS: {:4f} | ".format(val_loss[-1]), "VAL_ACC: {:4f} | ".format(val_acc[-1]))
 
@@ -211,4 +212,7 @@ def train(args):
                        batch=batch_size, best_loss=best_loss, save_argument=save_argument)
 
         if swa:
-            optim.swap_swa_sgd()
+            try:
+                optim.swap_swa_sgd()
+            except:
+                pass
