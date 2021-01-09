@@ -21,7 +21,7 @@ class TrainDataset(torch.utils.data.Dataset):
         self.cutmix = cutmix
         self.fmix = fmix
         lst_label = list(df['label'])
-        lst_input = list(os.path.join(data_dir, x) for x in df.image_id.values)
+        lst_input = list(x for x in df.image_id.values)
         self.lst_label = lst_label
         self.lst_input = lst_input
 
@@ -32,10 +32,9 @@ class TrainDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         label = self.lst_label[index]
-        # input = cv2.imread(self.lst_input[index], cv2.IMREAD_COLOR)
-        # input = cv2.cvtColor(input, cv2.COLOR_BGR2RGB)  # result of input shape is y,x,c
-        input = cv2.imread(self.lst_input[index])
-        input = input[:, :, ::-1]
+        input = cv2.imread(os.path.join(self.data_dir, self.lst_input[index]), cv2.IMREAD_COLOR)
+        input = cv2.cvtColor(input, cv2.COLOR_BGR2RGB)  # result of input shape is y,x,c
+
 
         if self.transform:
             input = self.transform(image=input)['image']
@@ -86,14 +85,14 @@ class TestDataset(torch.utils.data.Dataset):
         self.img_y = img_y
         self.transform = transform
 
-        lst_input = ['./data/test_images/2216849948.jpg']
+        lst_input = os.listdir(self.data_dir)
         self.lst_input = lst_input
 
     def __len__(self):
         return len(self.lst_input)
 
     def __getitem__(self, index):
-        input = cv2.imread(self.lst_input[index], cv2.IMREAD_COLOR)
+        input = cv2.imread(os.path.join(self.data_dir, self.lst_input[index]), cv2.IMREAD_COLOR)
         input = cv2.cvtColor(input, cv2.COLOR_BGR2RGB)  # result of input shape is y,x,c
 
         if self.transform:

@@ -270,29 +270,32 @@ def test(args):
 
     #used_epoch = [6, 7, 8, 9]  if test use rnd_epochs, it can have weights for each iteration.
 
-
     with torch.no_grad():
         net.eval()
         st_iter = 0
-        tta = 5
-        pred = []
+        tta = 3
+        pred_tta = []
 
         for iter in range(st_iter + 1, tta + 1):
+            pred_epoch = []
+
             for batch, data in enumerate(loader_test, 1):
                 # forward pass
                 input = data['input'].to(device)
 
                 output = net(input)
-
                 output = torch.softmax(output, dim=1).cpu().detach().numpy()
-                pred.append(output)
 
                 print("TTA ITERATION: {}/{} | ".format(iter, tta), "BATCH: %04d / %04d" % (batch, num_batch_test))
 
-        print(pred)
-        pred = (np.mean(pred, axis=0)).argmax(axis=1)
+                pred_epoch += [output]
+
+            pred_epoch = np.concatenate(pred_epoch, axis=0)
+            pred_tta += [pred_epoch/tta]
+
+        pred = (np.mean(pred_tta, axis=0)).argmax(axis=1)
 
         # submission
-        if batch % num_batch_test == 0:
-            save_submission(result_dir=result_dir, prediction=pred, epoch=num_epoch, batch=batch_size)
+        if tta % iter == 0:
+            save_submission(data_dir=data_dir, result_dir=result_dir, pred=pred, epoch=num_epoch, batch=batch_size)
 

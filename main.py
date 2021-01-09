@@ -20,9 +20,9 @@ parser.add_argument("--img_x", default=512, type=int, dest="img_x")
 parser.add_argument("--img_y", default=512, type=int, dest="img_y")
 
 parser.add_argument("--lr", default=1e-4, type=float, dest="lr")
-parser.add_argument("--num_fold", default=5, type=int, dest="num_fold")
+parser.add_argument("--num_fold", default=10, type=int, dest="num_fold")
 parser.add_argument("--num_epoch", default=10, type=int, dest="num_epoch")
-parser.add_argument("--batch_size", default=4, type=int, dest="batch_size")
+parser.add_argument("--batch_size", default=8, type=int, dest="batch_size")
 
 parser.add_argument("--cutmix", default=False, choices=[True, False], type=bool, dest="cutmix")
 parser.add_argument("--fmix", default=False, choices=[True, False], type=bool, dest="fmix")
@@ -30,13 +30,13 @@ parser.add_argument("--fmix", default=False, choices=[True, False], type=bool, d
 parser.add_argument("--label_smooth", default=False, choices=[True, False], type=bool, dest="label_smooth")
 parser.add_argument("--swa", default=False, choices=[True, False], type=bool, dest="swa")
 
-parser.add_argument("--data_dir", default="./data/test_images", type=str, dest="data_dir")
+parser.add_argument("--data_dir", default="./etc/sample_data", type=str, dest="data_dir")
 parser.add_argument("--ckpt_dir", default="./checkpoint", type=str, dest="ckpt_dir")
 parser.add_argument("--result_dir", default="./result", type=str, dest="result_dir")
 
 parser.add_argument("--network", default="tf_efficientnet_b4_ns", type=str, dest="network")
 
-args = parser.parse_args()
+args, unknown = parser.parse_known_args()
 
 ##
 if __name__ == "__main__":

@@ -24,16 +24,15 @@ def flatten(lst):
 
 
 ## 제출파일 저장하기
-def save_submission(result_dir, prediction, epoch, batch):
+def save_submission(data_dir, result_dir, pred, epoch, batch):
     if not os.path.exists(result_dir):
         os.makedirs(result_dir)
 
     suffix = 'epoch{}_batch{}_date{}'.format(epoch, batch, datetime.now().strftime("%m.%d-%H:%M"))
 
-    #pred = flatten(prediction)
-    pred = prediction
-    submission = pd.read_csv('./data/sample_submission.csv')
-    submission['label'] = fn_tonumpy(torch.LongTensor(pred))
+    submission = pd.DataFrame()
+    submission['image_id'] = list(os.listdir(data_dir))
+    submission['label'] = pred
     submission.to_csv('./result/submission_{}.csv'.format(suffix), index=False)
 
 ## save model
