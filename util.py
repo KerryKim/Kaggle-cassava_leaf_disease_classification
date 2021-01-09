@@ -12,11 +12,6 @@ import albumentations as A
 
 from datetime import datetime
 
-# Fmix-master folder rigit click -> mark directory as -> resources
-sys.path.append('/home/kerrykim/jupyter_notebook/010.cldc/FMix-master')
-from fmix import *
-from train import *
-
 ## from tensor to numpy function
 fn_tonumpy = lambda x: x.to('cpu').detach().numpy()
 
@@ -35,9 +30,10 @@ def save_submission(result_dir, prediction, epoch, batch):
 
     suffix = 'epoch{}_batch{}_date{}'.format(epoch, batch, datetime.now().strftime("%m.%d-%H:%M"))
 
-    pred = flatten(prediction)
-    submission = pd.read_csv('./data/submission.csv')
-    submission['digit'] = fn_tonumpy(torch.LongTensor(pred))
+    #pred = flatten(prediction)
+    pred = prediction
+    submission = pd.read_csv('./data/sample_submission.csv')
+    submission['label'] = fn_tonumpy(torch.LongTensor(pred))
     submission.to_csv('./result/submission_{}.csv'.format(suffix), index=False)
 
 ## save model
@@ -47,8 +43,8 @@ def save_model(ckpt_dir, net, optim, num_epoch, epoch, batch, best_loss, save_ar
 
     suffix = 'model_epoch{}_batch{}_date{}'.format(epoch, batch, datetime.now().strftime("%m.%d-%H:%M"))
 
-    filename = os.path.join(ckpt_dir, 'checkpoint')
-    best_filename = os.path.join(ckpt_dir, 'best_checkpoint')
+    filename = os.path.join(ckpt_dir, 'checkpoint_0')
+    best_filename = os.path.join(ckpt_dir, 'best_checkpoint_0')
     final_filename = os.path.join(ckpt_dir, 'final_' + suffix)
 
     # save model every epoch
@@ -61,6 +57,8 @@ def save_model(ckpt_dir, net, optim, num_epoch, epoch, batch, best_loss, save_ar
 
     if num_epoch == epoch:
         shutil.copyfile(best_filename, final_filename)
+        os.remove(filename)
+        os.remove(best_filename)
 
 ## 네트워크 불러오기
 def load(ckpt_dir, net, optim):
@@ -75,6 +73,7 @@ def load(ckpt_dir, net, optim):
 
     net.load_state_dict(dict_model['net'])
     optim.load_state_dict(dict_model['optim'])
+    #epoch.load_state_dict(dict_model['epoch'])
     epoch = int(ckpt_lst[-1].split('epoch')[1].split('_batch')[0])
 
     return net, optim, epoch

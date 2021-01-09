@@ -6,8 +6,12 @@ import cv2
 import torch
 from util import *
 
+# Fmix-master folder rigit click -> mark directory as -> resources
+sys.path.append('/home/kerrykim/jupyter_notebook/010.cldc/FMix-master')
+from fmix import *
+
 ##
-class Dataset(torch.utils.data.Dataset):
+class TrainDataset(torch.utils.data.Dataset):
     def __init__(self, df, data_dir, img_x, img_y, transform=None, cutmix=False, fmix=False):
         self.df = df
         self.data_dir = data_dir
@@ -16,7 +20,6 @@ class Dataset(torch.utils.data.Dataset):
         self.transform = transform
         self.cutmix = cutmix
         self.fmix = fmix
-        self.to_tensor = ToTensor()
         lst_label = list(df['label'])
         lst_input = list(os.path.join(data_dir, x) for x in df.image_id.values)
         self.lst_label = lst_label
@@ -29,13 +32,14 @@ class Dataset(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         label = self.lst_label[index]
-        input = cv2.imread(self.lst_input[index], cv2.IMREAD_COLOR)
-        input = cv2.cvtColor(input, cv2.COLOR_BGR2RGB)  # result of input shape is y,x,c
-
+        # input = cv2.imread(self.lst_input[index], cv2.IMREAD_COLOR)
+        # input = cv2.cvtColor(input, cv2.COLOR_BGR2RGB)  # result of input shape is y,x,c
+        input = cv2.imread(self.lst_input[index])
+        input = input[:, :, ::-1]
 
         if self.transform:
             input = self.transform(image=input)['image']
-        '''
+
         if self.cutmix and np.random.uniform(0., 1., size=1)[0] > 0.5:
             # with torch.no_grad():
             cmix_idx = np.random.choice(self.df.index, size=1)[0]
@@ -69,28 +73,38 @@ class Dataset(torch.utils.data.Dataset):
             # mix target
             rate = mask.sum() / self.img_x / self.img_y
             label = rate * label + (1. - rate) * self.df['label'][fmix_idx]
-        '''
 
         data = {'input' : input, 'label' : label}
-        #data = self.to_tensor(data)
-
 
         return data
 
 ##
-class ToTensor(object):
-    def __call__(self, data):
-        label, input = data['label'], data['input']
+class TestDataset(torch.utils.data.Dataset):
+    def __init__(self, data_dir, img_x, img_y, transform=None):
+        self.data_dir = data_dir
+        self.img_x = img_x
+        self.img_y = img_y
+        self.transform = transform
 
-        if input.ndim == 2:
-            input = input[:, :, np.newaxis]
+        lst_input = ['./data/test_images/2216849948.jpg']
+        self.lst_input = lst_input
 
-        input = np.moveaxis(input[:, :, :], -1, 0)
+    def __len__(self):
+        return len(self.lst_input)
 
-        data = {'label': torch.tensor(label, dtype=torch.long),
-                'input': torch.tensor(input, dtype=torch.float)}
+    def __getitem__(self, index):
+        input = cv2.imread(self.lst_input[index], cv2.IMREAD_COLOR)
+        input = cv2.cvtColor(input, cv2.COLOR_BGR2RGB)  # result of input shape is y,x,c
+
+        if self.transform:
+            input = self.transform(image=input)['image']
+
+        data = {'input': input}
 
         return data
+
+
+##
 
 def rand_bbox(img_x, img_y, lam):    # size = image size, lam = beta distribution
     W = img_x
