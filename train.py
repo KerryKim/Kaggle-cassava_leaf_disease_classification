@@ -76,7 +76,7 @@ def dataloader_train(df, data_dir, trn_idx, val_idx, img_x, img_y, batch_size, c
 
 ##
 def dataloader_test(data_dir, img_x, img_y, batch_size):
-    dataset_test = TestDataset(data_dir=data_dir, img_x=img_x, img_y=img_y, transform=transform_train(img_x, img_y))
+    dataset_test = TestDataset(data_dir=data_dir, img_x=img_x, img_y=img_y, transform=transform_test(img_x, img_y))
     loader_test = DataLoader(dataset_test, batch_size=batch_size, shuffle=False, num_workers=8)
 
     num_data_test = len(dataset_test)
@@ -274,7 +274,7 @@ def test(args):
     with torch.no_grad():
         net.eval()
         st_iter = 0
-        tta = 1
+        tta = 5
         pred = []
 
         for iter in range(st_iter + 1, tta + 1):
