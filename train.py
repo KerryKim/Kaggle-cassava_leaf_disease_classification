@@ -19,6 +19,9 @@ from sklearn.metrics import accuracy_score
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
+from Lookahead import Lookahead
+from RAdam import RAdam
+from bi_tempered_loss import *
 
 from model import *
 from loss import *
@@ -32,10 +35,10 @@ def transform_train(img_x, img_y):
                       A.HorizontalFlip(p=0.5),
                       A.VerticalFlip(p=0.5),
                       A.ShiftScaleRotate(p=0.5),
-                      A.HueSaturationValue(hue_shift_limit=0.2, sat_shift_limit=0.2, val_shift_limit=0.2, p=0.5),
-                      A.RandomBrightnessContrast(brightness_limit=(-0.1, 0.1), contrast_limit=(-0.1, 0.1), p=0.5),
+                      # A.HueSaturationValue(hue_shift_limit=0.2, sat_shift_limit=0.2, val_shift_limit=0.2, p=0.5),
+                      # A.RandomBrightnessContrast(brightness_limit=(-0.1, 0.1), contrast_limit=(-0.1, 0.1), p=0.5),
                       A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225], max_pixel_value=255.0, p=1.0),
-                      A.CoarseDropout(p=0.5), A.Cutout(p=0.5),ToTensorV2(p=1.0)], p=1.)
+                      A.CoarseDropout(p=0.5), ToTensorV2(p=1.0)], p=1.)
 
 
 def transform_val(img_x, img_y):
@@ -50,8 +53,8 @@ def transform_test(img_x, img_y):
             A.Transpose(p=0.5),
             A.HorizontalFlip(p=0.5),
             A.VerticalFlip(p=0.5),
-            A.HueSaturationValue(hue_shift_limit=0.2, sat_shift_limit=0.2, val_shift_limit=0.2, p=0.5),
-            A.RandomBrightnessContrast(brightness_limit=(-0.1,0.1), contrast_limit=(-0.1, 0.1), p=0.5),
+            # A.HueSaturationValue(hue_shift_limit=0.2, sat_shift_limit=0.2, val_shift_limit=0.2, p=0.5),
+            # A.RandomBrightnessContrast(brightness_limit=(-0.1,0.1), contrast_limit=(-0.1, 0.1), p=0.5),
             A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225], max_pixel_value=255.0, p=1.0),
             ToTensorV2(p=1.0)], p=1.)
 
@@ -116,8 +119,8 @@ def train(args):
     Kfold = StratifiedKFold(n_splits=num_fold, shuffle=True, random_state=seed)
 
     for fold, (trn_idx, val_idx) in enumerate(Kfold.split(np.arange(df.shape[0]), df.label.values)):
-        if fold > 0:
-            break
+        #if fold > 0:
+            #break
 
         print("Training start ... ")
         print("DATE: {} | ".format(datetime.now().strftime("%m.%d-%H:%M")), "KFOLD: {}/{}".format(fold, num_fold))
@@ -127,7 +130,9 @@ def train(args):
 
         net = CassvaImgClassifier(network, df.label.nunique(), pretrained=True).to(device)
         fn_loss = nn.CrossEntropyLoss().to(device) if not label_smooth else Label_Smooth_CrossEntropyLoss
-        optim = torch.optim.Adam(net.parameters(), lr=lr, weight_decay=1e-6)
+        #optim = torch.optim.Adam(net.parameters(), lr=lr, weight_decay=1e-6)
+        optimizer = RAdam(net.parameters(), lr=lr, weight_decay=1e-6)
+        optim = Lookahead(optimizer, alpha=0.6, k=10)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optim, T_0=10, T_mult=1, eta_min=1e-6, last_epoch=-1)
         scaler = GradScaler()
 
@@ -155,14 +160,16 @@ def train(args):
 
             for batch, data in enumerate(loader_train, 1):
                 # forward pass
-                label = data['label'].to(device)
-                input = data['input'].to(device)
+                label = data['label'].to(device).long()
+                input = data['input'].to(device).float()
 
                 with autocast():
                     output = net(input)
                     loss = fn_loss(output, label)
+                    #loss = bi_tempered_logistic_loss(output, label, t1=0.8, t2=1.4, label_smoothing=0.2)
                     optim.zero_grad()
 
+                # if ((batch + 1) % 2 == 0) or ((batch + 1) == len(loader_train)):
                 # backward pass
                 scaler.scale(loss).backward()
                 scaler.step(optim)
@@ -183,6 +190,8 @@ def train(args):
             train_loss.append(loss_epoch_train / num_batch_train)
             train_acc.append(acc_epoch_train / num_batch_train)
 
+            #scheduler.step(train_loss[-1])
+
             with torch.no_grad():
                 net.eval()
                 loss_arr = []
@@ -191,10 +200,12 @@ def train(args):
                 acc_epoch_val = 0
 
                 for batch, data in enumerate(loader_val, 1):
-                    label = data['label'].to(device)
-                    input = data['input'].to(device)
+                    label = data['label'].to(device).long()
+                    input = data['input'].to(device).float()
 
                     output = net(input)
+
+                    #loss = bi_tempered_logistic_loss(output, label, t1=0.8, t2=1.4, label_smoothing=0.2)
 
                     loss = fn_loss(output, label)
 
@@ -207,10 +218,10 @@ def train(args):
                     acc_batch_val = accuracy_score(label, output)
                     acc_epoch_val += acc_batch_val
 
-                scheduler.step(loss_batch_val)
-
                 val_loss.append(loss_epoch_val / num_batch_val)
                 val_acc.append(acc_epoch_val / num_batch_val)
+
+            scheduler.step(val_loss[-1])
 
             print("DATE: {} | ".format(datetime.now().strftime("%m.%d-%H:%M")), "EPOCH: {}/{} | ".format(epoch, num_epoch),
                   "TRAIN_LOSS: {:4f} | ".format(train_loss[-1]),  "TRAIN_ACC: {:4f} | ".format(train_acc[-1]),
@@ -221,8 +232,11 @@ def train(args):
             # if loss/acc is improve, esp starts 0
             if best_loss > val_loss[-1] and best_acc <= val_acc[-1]:
                 early_stop_patience = 0
-            if early_stop_patience > 10:
+            if early_stop_patience > 3:
                 print("Training early stopped. Loss/Acc was not improved")
+                epoch = epoch - 3
+                save_model(ckpt_dir=ckpt_dir, net=net, optim=optim, fold=fold, num_epoch=epoch, epoch=epoch,
+                           batch=batch_size, best_loss=best_loss, save_argument=save_argument)
                 break
 
             # save best model
@@ -230,7 +244,7 @@ def train(args):
             best_loss = min(val_loss[-1], best_loss)
             best_acc = max(val_acc[-1], best_acc)
 
-            save_model(ckpt_dir=ckpt_dir, net=net, optim=optim, num_epoch=num_epoch, epoch=epoch,
+            save_model(ckpt_dir=ckpt_dir, net=net, optim=optim, fold=fold, num_epoch=num_epoch, epoch=epoch,
                        batch=batch_size, best_loss=best_loss, save_argument=save_argument)
 
         if swa:
@@ -264,7 +278,7 @@ def test(args):
     df = pd.read_csv('./data/train.csv')
 
     loader_test, num_batch_test = dataloader_test(data_dir=data_dir, img_x=img_x, img_y=img_y, batch_size=batch_size)
-    net = CassvaImgClassifier(network, df.label.nunique(), pretrained=True).to(device)
+    net = CassvaImgClassifier(network, df.label.nunique(), pretrained=False).to(device)
     optim = torch.optim.Adam(net.parameters(), lr=lr, weight_decay=1e-6)
     net, optim, epoch = load(ckpt_dir=ckpt_dir, net=net, optim=optim)
 

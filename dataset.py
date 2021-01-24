@@ -34,6 +34,7 @@ class TrainDataset(torch.utils.data.Dataset):
         label = self.lst_label[index]
         input = cv2.imread(os.path.join(self.data_dir, self.lst_input[index]), cv2.IMREAD_COLOR)
         input = cv2.cvtColor(input, cv2.COLOR_BGR2RGB)  # result of input shape is y,x,c
+        #input = np.where(input >= 100, input, 0)
 
 
         if self.transform:
@@ -94,6 +95,7 @@ class TestDataset(torch.utils.data.Dataset):
     def __getitem__(self, index):
         input = cv2.imread(os.path.join(self.data_dir, self.lst_input[index]), cv2.IMREAD_COLOR)
         input = cv2.cvtColor(input, cv2.COLOR_BGR2RGB)  # result of input shape is y,x,c
+        #input = np.where(input >= 100, input, 0)
 
         if self.transform:
             input = self.transform(image=input)['image']

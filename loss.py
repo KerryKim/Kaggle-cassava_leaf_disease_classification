@@ -13,7 +13,7 @@ def CrossEntropyLoss(output, label):
     else:
         return torch.mean(torch.sum(-label * F.log_softmax(output, dim=1), dim=1))
 
-def Label_Smooth_CrossEntropyLoss(output, label, epsilon=0.1):
+def Label_Smooth_CrossEntropyLoss(output, label, epsilon=0.2):
     n_class = output.shape[1]
     device = output.device
     onehot = F.one_hot(label, n_class).to(dtype=torch.float, device=device)
