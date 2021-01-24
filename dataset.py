@@ -1,18 +1,18 @@
 import os
-import sys
-import numpy as np
 import cv2
+import numpy as np
 
 import torch
-from util import *
 
 # Fmix-master folder rigit click -> mark directory as -> resources
+import sys
 sys.path.append('/home/kerrykim/jupyter_notebook/010.cldc/FMix-master')
 from fmix import *
 
 ##
-class TrainDataset(torch.utils.data.Dataset):
-    def __init__(self, df, data_dir, img_x, img_y, transform=None, cutmix=False, fmix=False):
+class Dataset(torch.utils.data.Dataset):
+    def __init__(self, mode, df, data_dir, img_x, img_y, transform=None, cutmix=False, fmix=False):
+        self.mode = mode
         self.df = df
         self.data_dir = data_dir
         self.img_x = img_x
@@ -20,8 +20,10 @@ class TrainDataset(torch.utils.data.Dataset):
         self.transform = transform
         self.cutmix = cutmix
         self.fmix = fmix
+
         lst_label = list(df['label'])
         lst_input = list(x for x in df.image_id.values)
+
         self.lst_label = lst_label
         self.lst_input = lst_input
 
@@ -31,11 +33,10 @@ class TrainDataset(torch.utils.data.Dataset):
 
 
     def __getitem__(self, index):
-        label = self.lst_label[index]
+        if self.mode == 'train':
+            label = self.lst_label[index]
         input = cv2.imread(os.path.join(self.data_dir, self.lst_input[index]), cv2.IMREAD_COLOR)
         input = cv2.cvtColor(input, cv2.COLOR_BGR2RGB)  # result of input shape is y,x,c
-        #input = np.where(input >= 100, input, 0)
-
 
         if self.transform:
             input = self.transform(image=input)['image']
@@ -52,7 +53,6 @@ class TrainDataset(torch.utils.data.Dataset):
             input[bbx1:bbx2, bby1:bby2, :] = cmix_img[bbx1:bbx2, bby1:bby2, :]
             rate = 1 - ((bbx2 - bbx1) * (bby2 - bby1) / (self.img_x * self.img_y))
             label = rate * label + (1. - rate) * self.df['label'][cmix_idx]
-
 
         if self.fmix and np.random.uniform(0., 1., size=1)[0] > 0.5:
             # with torch.no_grad():
@@ -74,39 +74,15 @@ class TrainDataset(torch.utils.data.Dataset):
             rate = mask.sum() / self.img_x / self.img_y
             label = rate * label + (1. - rate) * self.df['label'][fmix_idx]
 
-        data = {'input' : input, 'label' : label}
-
-        return data
-
-##
-class TestDataset(torch.utils.data.Dataset):
-    def __init__(self, data_dir, img_x, img_y, transform=None):
-        self.data_dir = data_dir
-        self.img_x = img_x
-        self.img_y = img_y
-        self.transform = transform
-
-        lst_input = os.listdir(self.data_dir)
-        self.lst_input = lst_input
-
-    def __len__(self):
-        return len(self.lst_input)
-
-    def __getitem__(self, index):
-        input = cv2.imread(os.path.join(self.data_dir, self.lst_input[index]), cv2.IMREAD_COLOR)
-        input = cv2.cvtColor(input, cv2.COLOR_BGR2RGB)  # result of input shape is y,x,c
-        #input = np.where(input >= 100, input, 0)
-
-        if self.transform:
-            input = self.transform(image=input)['image']
-
-        data = {'input': input}
+        if self.mode == 'train':
+            data = {'input' : input, 'label' : label}
+        else:
+            data = {'input': input}
 
         return data
 
 
 ##
-
 def rand_bbox(img_x, img_y, lam):    # size = image size, lam = beta distribution
     W = img_x
     H = img_y

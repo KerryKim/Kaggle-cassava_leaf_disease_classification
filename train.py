@@ -23,6 +23,8 @@ from Lookahead import Lookahead
 from RAdam import RAdam
 from bi_tempered_loss import *
 
+from tqdm import tqdm
+
 from model import *
 from loss import *
 from dataset import *
@@ -59,14 +61,16 @@ def transform_test(img_x, img_y):
             ToTensorV2(p=1.0)], p=1.)
 
 ##
-def dataloader_train(df, data_dir, trn_idx, val_idx, img_x, img_y, batch_size, cutmix, fmix):
+def dataloader_train(mode, df, data_dir, trn_idx, val_idx, img_x, img_y, batch_size, cutmix, fmix):
     train = df.loc[trn_idx, :].reset_index(drop=True)
     val = df.loc[val_idx, :].reset_index(drop=True)
 
-    dataset_train = TrainDataset(df=train, data_dir=data_dir, img_x=img_x, img_y=img_y, transform=transform_train(img_x, img_y), cutmix=cutmix, fmix=fmix)
+    dataset_train = Dataset(mode=mode, df=train, data_dir=data_dir, img_x=img_x, img_y=img_y,
+                                 transform=transform_train(img_x, img_y), cutmix=cutmix, fmix=fmix)
     loader_train = DataLoader(dataset_train, batch_size=batch_size, shuffle=True, num_workers=8)
 
-    dataset_val = TrainDataset(df=val, data_dir=data_dir, img_x=img_x, img_y=img_y, transform=transform_val(img_x, img_y), cutmix=False, fmix=False)
+    dataset_val = Dataset(mode=mode, df=val, data_dir=data_dir, img_x=img_x, img_y=img_y,
+                               transform=transform_val(img_x, img_y), cutmix=False, fmix=False)
     loader_val = DataLoader(dataset_val, batch_size=batch_size, shuffle=True, num_workers=8)
 
     num_data_train = len(dataset_train)
@@ -77,9 +81,10 @@ def dataloader_train(df, data_dir, trn_idx, val_idx, img_x, img_y, batch_size, c
 
     return loader_train, loader_val, num_batch_train, num_batch_val
 
-##
-def dataloader_test(data_dir, img_x, img_y, batch_size):
-    dataset_test = TestDataset(data_dir=data_dir, img_x=img_x, img_y=img_y, transform=transform_test(img_x, img_y))
+
+def dataloader_test(mode, data_dir, img_x, img_y, batch_size):
+    dataset_test = Dataset(mode=mode, data_dir=data_dir, img_x=img_x, img_y=img_y,
+                           transform=transform_test(img_x, img_y))
     loader_test = DataLoader(dataset_test, batch_size=batch_size, shuffle=False, num_workers=8)
 
     num_data_test = len(dataset_test)
@@ -90,9 +95,9 @@ def dataloader_test(data_dir, img_x, img_y, batch_size):
 ##
 def train(args):
     # hyperparameters
-    train_continue = args.train_continue
-    seed = args.seed
+    mode = args.mode
 
+    seed = args.seed
     img_x = args.img_x
     img_y = args.img_y
 
@@ -118,21 +123,19 @@ def train(args):
     df = pd.read_csv('./data/train.csv')
     Kfold = StratifiedKFold(n_splits=num_fold, shuffle=True, random_state=seed)
 
-    for fold, (trn_idx, val_idx) in enumerate(Kfold.split(np.arange(df.shape[0]), df.label.values)):
-        #if fold > 0:
+    for fold, (trn_idx, val_idx) in enumerate(Kfold.split(np.arange(df.shape[0]), df.label.values), 1):
+        #if fold > 1:
             #break
 
         print("Training start ... ")
         print("DATE: {} | ".format(datetime.now().strftime("%m.%d-%H:%M")), "KFOLD: {}/{}".format(fold, num_fold))
 
         loader_train, loader_val, num_batch_train, num_batch_val = \
-            dataloader_train(df, data_dir, trn_idx, val_idx, img_x, img_y, batch_size, cutmix, fmix)
+            dataloader_train(mode, df, data_dir, trn_idx, val_idx, img_x, img_y, batch_size, cutmix, fmix)
 
         net = CassvaImgClassifier(network, df.label.nunique(), pretrained=True).to(device)
         fn_loss = nn.CrossEntropyLoss().to(device) if not label_smooth else Label_Smooth_CrossEntropyLoss
-        #optim = torch.optim.Adam(net.parameters(), lr=lr, weight_decay=1e-6)
-        optimizer = RAdam(net.parameters(), lr=lr, weight_decay=1e-6)
-        optim = Lookahead(optimizer, alpha=0.6, k=10)
+        optim = torch.optim.Adam(net.parameters(), lr=lr, weight_decay=1e-6)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optim, T_0=10, T_mult=1, eta_min=1e-6, last_epoch=-1)
         scaler = GradScaler()
 
@@ -145,9 +148,6 @@ def train(args):
         best_acc = 0
         early_stop_patience = 0
 
-        if train_continue == "on":
-            net, optim, st_epoch = load(ckpt_dir=ckpt_dir, net=net, optim=optim)
-
         train_loss, val_loss, train_acc, val_acc = [], [], [], []
 
         for epoch in range(st_epoch + 1, num_epoch + 1):
@@ -158,7 +158,9 @@ def train(args):
             loss_epoch_train = 0
             acc_epoch_train = 0
 
-            for batch, data in enumerate(loader_train, 1):
+            pbar_train = tqdm(enumerate(loader_train), total=len(loader_train))
+
+            for batch, data in pbar_train:
                 # forward pass
                 label = data['label'].to(device).long()
                 input = data['input'].to(device).float()
@@ -166,7 +168,6 @@ def train(args):
                 with autocast():
                     output = net(input)
                     loss = fn_loss(output, label)
-                    #loss = bi_tempered_logistic_loss(output, label, t1=0.8, t2=1.4, label_smoothing=0.2)
                     optim.zero_grad()
 
                 # if ((batch + 1) % 2 == 0) or ((batch + 1) == len(loader_train)):
@@ -182,6 +183,8 @@ def train(args):
                 loss_batch_train = np.mean(loss_arr)
                 loss_epoch_train += loss_batch_train
 
+                pbar_train.set_description("loss_batch_trn %4f:" % loss_batch_train)
+
                 output = torch.argmax(output, dim=1).cpu().detach().numpy()
                 label = label.cpu().detach().numpy()
                 acc_batch_train = accuracy_score(label, output)
@@ -190,8 +193,6 @@ def train(args):
             train_loss.append(loss_epoch_train / num_batch_train)
             train_acc.append(acc_epoch_train / num_batch_train)
 
-            #scheduler.step(train_loss[-1])
-
             with torch.no_grad():
                 net.eval()
                 loss_arr = []
@@ -199,19 +200,21 @@ def train(args):
                 loss_epoch_val = 0
                 acc_epoch_val = 0
 
-                for batch, data in enumerate(loader_val, 1):
+                pbar_val = tqdm(enumerate(loader_val), total=len(loader_val))
+
+                for batch, data in pbar_val:
                     label = data['label'].to(device).long()
                     input = data['input'].to(device).float()
 
                     output = net(input)
-
-                    #loss = bi_tempered_logistic_loss(output, label, t1=0.8, t2=1.4, label_smoothing=0.2)
 
                     loss = fn_loss(output, label)
 
                     loss_arr += [loss.item()]
                     loss_batch_val = np.mean(loss_arr)
                     loss_epoch_val += loss_batch_val
+
+                    pbar_val.set_description("loss_batch_val %4f:" % loss_batch_val)
 
                     output = torch.argmax(output, dim=1).cpu().detach().numpy()
                     label = label.cpu().detach().numpy()
@@ -257,6 +260,8 @@ def train(args):
 ##
 def test(args):
     # hyperparameters
+    mode = args.mode
+
     img_x = args.img_x
     img_y = args.img_y
 
@@ -266,9 +271,9 @@ def test(args):
     num_epoch = args.num_epoch
 
     data_dir = args.data_dir
-    ckpt_dir = args.ckpt_dir
     result_dir = args.result_dir
 
+    model = args.model
     network = args.network
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -277,10 +282,10 @@ def test(args):
     print("Test start ... ")
     df = pd.read_csv('./data/train.csv')
 
-    loader_test, num_batch_test = dataloader_test(data_dir=data_dir, img_x=img_x, img_y=img_y, batch_size=batch_size)
+    loader_test, num_batch_test = dataloader_test(mode=mode, data_dir=data_dir, img_x=img_x, img_y=img_y, batch_size=batch_size)
     net = CassvaImgClassifier(network, df.label.nunique(), pretrained=False).to(device)
     optim = torch.optim.Adam(net.parameters(), lr=lr, weight_decay=1e-6)
-    net, optim, epoch = load(ckpt_dir=ckpt_dir, net=net, optim=optim)
+    net, optim, epoch = load(model=model, net=net, optim=optim)
 
     #used_epoch = [6, 7, 8, 9]  if test use rnd_epochs, it can have weights for each iteration.
 
@@ -311,5 +316,92 @@ def test(args):
 
         # submission
         if tta % iter == 0:
-            save_submission(data_dir=data_dir, result_dir=result_dir, pred=pred, epoch=num_epoch, batch=batch_size)
+            save_submission(data_dir=data_dir, pred=pred)
 
+
+'''
+        pred = 0.5*pred1 + 0.5*pred2
+        pred = pred.argmax(axis=1)
+
+def test(args):
+    # hyperparameters
+    img_x = args.img_x
+    img_y = args.img_y
+
+    lr = args.lr
+    batch_size = args.batch_size
+
+    num_epoch = args.num_epoch
+
+    data_dir = args.data_dir
+    ckpt_dir = args.ckpt_dir
+    result_dir = args.result_dir
+
+    network = args.network
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+##
+    print("Test start ... ")
+    df = pd.read_csv('../input/cassava-leaf-disease-classification/train.csv')
+
+    loader_test, num_batch_test = dataloader_test(data_dir=data_dir, img_x=img_x, img_y=img_y, batch_size=batch_size)
+    net = CassvaImgClassifier(network, df.label.nunique(), pretrained=False).to(device)
+    optim = torch.optim.Adam(net.parameters(), lr=lr, weight_decay=1e-6)
+    
+    ckpt_lst = os.listdir(ckpt_dir)
+    ckpt_lst.sort(key=lambda f: int(''.join(filter(str.isdigit, f))))
+    
+    avg_pred = []
+    
+    for i, model in enumerate(ckpt_lst):
+
+        dict_model = torch.load('%s/%s' % (ckpt_dir, model))
+
+        net.load_state_dict(dict_model['net'])
+        optim.load_state_dict(dict_model['optim'])
+        epoch = int(ckpt_lst[-1].split('epoch')[1].split('_batch')[0])
+
+
+        #used_epoch = [6, 7, 8, 9]  if test use rnd_epochs, it can have weights for each iteration.
+
+        with torch.no_grad():
+            net.eval()
+            st_iter = 0
+            tta = 3
+            pred_tta = []
+
+            for iter in range(st_iter + 1, tta + 1):
+                pred_epoch = []
+
+                for batch, data in enumerate(loader_test, 1):
+                    # forward pass
+                    input = data['input'].to(device)
+
+                    output = net(input)
+                    output = torch.softmax(output, dim=1).cpu().detach().numpy()
+
+                    print("TTA ITERATION: {}/{} | ".format(iter, tta), "BATCH: %04d / %04d" % (batch, num_batch_test))
+
+                    pred_epoch += [output]
+
+                pred_epoch = np.concatenate(pred_epoch, axis=0)
+                pred_tta += [pred_epoch/tta]
+
+            pred = (np.mean(pred_tta, axis=0))
+            
+        avg_pred.append(pred)
+
+    avg_pred = np.mean(avg_pred, axis=0)
+    
+    pred = pred.argmax(axis=1)
+
+    #print(pred)
+
+    # submission
+    if tta % iter == 0:
+        save_submission(data_dir=data_dir, result_dir=result_dir, pred=pred, epoch=num_epoch, batch=batch_size)
+        
+        
+        
+'''
