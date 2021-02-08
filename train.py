@@ -106,12 +106,12 @@ def train(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     ##
-    df = pd.read_csv('./data/train_c_label5.csv')
+    df = pd.read_csv('./data/train.csv')
     Kfold = StratifiedKFold(n_splits=num_fold, shuffle=True, random_state=seed)
 
     for fold, (trn_idx, val_idx) in enumerate(Kfold.split(np.arange(df.shape[0]), df.label.values), 1):
-        #if fold > 1:
-            #break
+        if fold > 1:
+            break
 
         print("Training start ... ")
         print("DATE: {} | ".format(datetime.now().strftime("%m.%d-%H:%M")), "KFOLD: {}/{}".format(fold, num_fold))
@@ -125,6 +125,7 @@ def train(args):
         scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optim, T_0=10, T_mult=1, eta_min=1e-6, last_epoch=-1)
         scaler = GradScaler()
 
+
         if swa:
             SWA(optim, swa_start=10, swa_freq=2, swa_lr=0.0005)
 
@@ -136,6 +137,11 @@ def train(args):
 
         train_loss, val_loss, train_acc, val_acc = [], [], [], []
 
+        # regularity
+        penalty = 'l1'
+        c = (torch.FloatTensor([0.01])).to(device)
+        p = 1 if penalty == 'l1' else 2
+
         for epoch in range(st_epoch + 1, num_epoch + 1):
             net.train()
             loss_arr = []  # loss array for one batch
@@ -144,9 +150,8 @@ def train(args):
             loss_epoch_train = 0
             acc_epoch_train = 0
 
-            pbar_train = tqdm(enumerate(loader_train), total=len(loader_train))
+            for batch, data in enumerate(loader_train, 1):
 
-            for batch, data in pbar_train:
                 # forward pass
                 label = data['label'].to(device).long()
                 input = data['input'].to(device).float()
@@ -154,10 +159,12 @@ def train(args):
                 with autocast():
                     output = net(input)
                     loss = fn_loss(output, label)
+                    regularity = torch.norm(net.model.classifier.weight, p=p)
+                    loss = loss + c*regularity
                     scaler.scale(loss).backward()
 
                 # Gradient accumulation (After 2 batch, update gradient)
-                if ((batch + 1) % 2 == 0) or ((batch + 1) == len(loader_train)):
+                if (batch % 2 == 0) or (batch == len(loader_train)):
                     # backward pass
                     scaler.step(optim)
                     scaler.update()
@@ -166,8 +173,6 @@ def train(args):
                 loss_arr += [loss.item()]
                 loss_batch_train = np.mean(loss_arr)
                 loss_epoch_train += loss_batch_train
-
-                pbar_train.set_description("loss_batch_trn : %4f" % loss_batch_train)
 
                 output = torch.argmax(output, dim=1).cpu().detach().numpy()
                 label = label.cpu().detach().numpy()
@@ -184,9 +189,7 @@ def train(args):
                 loss_epoch_val = 0
                 acc_epoch_val = 0
 
-                pbar_val = tqdm(enumerate(loader_val), total=len(loader_val))
-
-                for batch, data in pbar_val:
+                for batch, data in enumerate(loader_val, 1):
                     label = data['label'].to(device).long()
                     input = data['input'].to(device).float()
 
@@ -198,8 +201,6 @@ def train(args):
                     loss_batch_val = np.mean(loss_arr)
                     loss_epoch_val += loss_batch_val
 
-                    pbar_val.set_description("loss_batch_val : %4f" % loss_batch_val)
-
                     output = torch.argmax(output, dim=1).cpu().detach().numpy()
                     label = label.cpu().detach().numpy()
                     acc_batch_val = accuracy_score(label, output)
@@ -209,6 +210,20 @@ def train(args):
                 val_acc.append(acc_epoch_val / num_batch_val)
 
             scheduler.step(val_loss[-1])
+
+            # informations
+            sparse_threshold = 0.0005
+
+            l1_norm = torch.norm(net.model.classifier.weight, p=1)
+            l2_norm = torch.norm(net.model.classifier.weight, p=2)
+            parameters = net.model.classifier.weight.data.cpu().numpy().reshape(-1)
+            t = abs(parameters).max() * sparse_threshold
+            nz = np.where(abs(parameters) < t)[0].shape[0]
+
+            print('epoch = {}, training accuracy = {:.3}, l1={:.5}, l2={:.3}, nz={}'.format(
+                epoch, val_acc[-1], l1_norm, l2_norm, nz))
+
+
 
             print("DATE: {} | ".format(datetime.now().strftime("%m.%d-%H:%M")), "EPOCH: {}/{} | ".format(epoch, num_epoch),
                   "TRAIN_LOSS: {:4f} | ".format(train_loss[-1]),  "TRAIN_ACC: {:4f} | ".format(train_acc[-1]),
@@ -221,6 +236,9 @@ def train(args):
                 early_stop_patience = 0
             if early_stop_patience > 3:
                 print("Training early stopped. Loss/Acc was not improved")
+                epoch = epoch - 3
+                save_model(ckpt_dir=ckpt_dir, net=net, optim=optim, fold=fold, num_epoch=epoch, epoch=epoch,
+                           batch=batch_size, best_loss=best_loss, save_argument=save_argument)
                 break
 
             # save best model
