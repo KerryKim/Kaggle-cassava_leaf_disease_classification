@@ -17,7 +17,7 @@ class CFG:
     img_y = 512
 
     num_fold = 5
-    num_epoch = 20
+    num_epoch = 10
     batch_size = 8
 
     gradient_accumulation_step = 2

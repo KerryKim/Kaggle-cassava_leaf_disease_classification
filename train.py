@@ -178,11 +178,9 @@ def train(df):
     df_19 = df.loc[df.source == 2019]
 
     skf = StratifiedKFold(n_splits=CFG.num_fold, shuffle=True, random_state=CFG.seed)
-    # skf.get_n_splits(np.arange(train_df.shape[0]), train_df['label'])
 
     KFOLD = [(idxT, idxV) for i, (idxT, idxV) in enumerate(skf.split(np.arange(df_20.shape[0]), df_20['label']))]
-    KFOLD_19 = [np.concatenate((idxT, idxV)) for i, (idxT, idxV) in
-                  enumerate(skf.split(np.arange(df_19.shape[0]), df_19['label']))]
+    KFOLD_19 = [np.concatenate((idxT, idxV)) for i, (idxT, idxV) in enumerate(skf.split(np.arange(df_19.shape[0]), df_19['label']))]
 
     for i in range(CFG.num_fold):
         (idxT, idxV) = KFOLD[i]
@@ -191,7 +189,7 @@ def train(df):
         (idxT, idxV) = KFOLD[i]
 
         # When train, 20,19 data all used. / When val, 20 data only used.
-        print(np.bincount(df['label'].iloc[idxT]), np.bincount(df_20['label'].iloc[idxV]))
+        # print(np.bincount(df['label'].iloc[idxT]), np.bincount(df_20['label'].iloc[idxV]))
 
     for fold, (trn_idx, val_idx) in enumerate(KFOLD, 1):
         LOGGER.info(f"Training starts ... KFOLD: {fold}/{CFG.num_fold}")
@@ -206,7 +204,6 @@ def train(df):
         loader_val = DataLoader(dataset_val, batch_size=CFG.batch_size, shuffle=False, num_workers=8, pin_memory=True, drop_last=True)
 
         net = CassvaImgClassifier(CFG.model, df.label.nunique(), pretrained=True).to(device)
-        # fn_loss = nn.CrossEntropyLoss().to(device)
         fn_loss = TaylorSmoothedLoss().to(device)
         optim = torch.optim.Adam(net.parameters(), lr=1e-4, weight_decay=1e-6, amsgrad=False) # 1e-6
         scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optim, T_0=7, T_mult=1, eta_min=8e-7, last_epoch=-1)
@@ -228,7 +225,7 @@ def train(df):
             # val
             avg_val_loss, score = val_one_epoch(loader_val, net, fn_loss, device)
 
-            scheduler.step()
+            scheduler.step(avg_val_loss) # 확인필요?
 
             # scoring
             elapsed = time.time() - start_time
